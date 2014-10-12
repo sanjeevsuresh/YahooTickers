@@ -21,3 +21,6 @@ $ pip install beautifulsoup4
 
 <a href="http://www.crummy.com/software/BeautifulSoup/bs4/doc/#installing-beautiful-soup">Read More</a>
 <h4>TODO:</h4>
+<ul>
+  <li>Integrate with Excel</li>
+</ul>
