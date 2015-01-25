@@ -1,10 +1,17 @@
-import urllib.request
+import urllib2
 import re
 import os
 import sys
 import datetime as DateTime
 from datetime import timedelta
 from bs4 import BeautifulSoup
+input = raw_input
+
+class TickerError(Exception):
+    def __init__(self, value):
+        self.value = value
+    def __str__(self):
+        return repr(self.value)
 
 def createFolder(folderName):
     try:
@@ -58,7 +65,7 @@ def correctIssues(userDefinedExtensions):
 
 def parodyBrowser(url):
     hdr = {'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.11 (KHTML,  like Gecko) Chrome/23.0.1271.64 Safari/537.11', 'Accept': 'text/html, application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8', 'Accept-Charset': 'ISO-8859-1, utf-8;q=0.7,*;q=0.3', 'Accept-Encoding': 'none', 'Accept-Language': 'en-US, en;q=0.8', 'Connection': 'keep-alive'}
-    req = urllib.request.Request(url, headers=hdr)
+    req = urllib2.Request(url, headers=hdr)
     return req
 
 def findCurrentDate():
@@ -80,9 +87,10 @@ def DateBefore(deltaDays=10):
 def HistoricalPricesPage(ticker):
     """
     @param ticker is the ticker of a company
-    find the current date, get the historical prices for the past 10 ten days.
+    finds the current date, and formats the url for
+    the historical prices for the past 10 ten days.
 
-    @returns the url of the Historical
+    @returns the url of the Historical Prices Page eg shown:
     http://finance.yahoo.com/q/hp?s=AAPL
     &a=08&b=1&c=2014
     &d=09&e=12&f=2014&g=d
@@ -95,7 +103,7 @@ def HistoricalPricesPage(ticker):
     url += "&g=d" # d means daily information
     return url
     
-def weirdPattern(descendants):
+def HtmlTableToList(descendants):
     """
     Takes in a weird Pattern of html
     returns a list of lists
@@ -117,17 +125,44 @@ def weirdPattern(descendants):
             index+=2
     return allData
 
-def mainDownloadPrices(ticker):
-    webpageRequest = parodyBrowser(HistoricalPricesPage(ticker))
-    htmlPageResponse = urllib.request.urlopen(webpageRequest)
-    soup = BeautifulSoup(htmlPageResponse)
-    tables = soup.find_all('table') 
+def findCorrectTable(tables):
+    """
+    @param tables is the result of Beautiful Soup find_all('table')s
+    """
     historicalPrices = None
     for table in tables:
         if 'class' in table.attrs and 'yfnc_datamodoutline1' in table['class']:
             print("Found table of Historical Prices\n")
-            historicalPrices = table
-    if(historicalPrices != None):
+            return table
+    raise TickerError("Could not find the correct historical prices table in html page")     
+
+def fetchHtmlResponse(req, tries, errorResponse):
+    if tries == 0:
+        raise TickerError("Could not fetch html page after five tries!\n{0}".format(errorResponse))
+    try:
+        return urllib2.urlopen(req)
+    except urllib2.HTTPError as e:
+        return fetchHtmlResponse(req, tries - 1, e)
+        
+
+def mainDownloadPrices(ticker):
+    """
+    This function:
+    I. Generates the request with the use of func HistoricalPricesPage
+    II. Opens the Webpage
+    III. Passes the response to the BeautifulSoup parser ...
+    IV. The parser finds the correct html table
+    V. Calls HtmlTableToList to do exactly that ...
+    
+    @return a tuple of (HtmlTable, List) 
+    """
+    webpageRequest = parodyBrowser(HistoricalPricesPage(ticker))
+    try:
+        htmlPageResponse = fetchHtmlResponse(webpageRequest, 5, None)
+        soup = BeautifulSoup(htmlPageResponse)
+        tables = soup.find_all('table') 
+        historicalPrices = findCorrectTable(tables)
+
         descendants = list(historicalPrices.children)
         if 'tr' in map(lambda tag: tag.name, descendants) and len(descendants) == 1:
             descendants = list(descendants[0].descendants)
@@ -136,14 +171,17 @@ def mainDownloadPrices(ticker):
         print(len(descendants))
         for index in range(1, len(descendants)):
             print("{0}\t{1}".format(index, str(descendants[index])) + "\n\n\n\n")
-        allData = weirdPattern(descendants)
+        allData = HtmlTableToList(descendants)
         for row in allData:
             print(row)
         return historicalPrices, allData
+    except TickerError as e:
+        raise TickerError("Ticker {0} failed!\n{1}".format(ticker, e))
 
 def main():
     tickers = ["AAPL", "GOOG", "SKM", "KT", "DCM", "SCTY", "VLKAY"]
-    tickers.extend(askForTickers())
+    #tickers = []
+    #tickers.extend(askForTickers())
     infoFile = open("Results.html", "w") 
     for ticker in tickers:
         html, data = mainDownloadPrices(ticker)
